@@ -16,14 +16,27 @@
 package io.gravitee.management.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.gravitee.common.http.HttpMethod;
 import io.gravitee.common.http.MediaType;
+import io.gravitee.definition.jackson.datatype.GraviteeMapper;
+import io.gravitee.definition.model.Path;
+import io.gravitee.definition.model.Policy;
+import io.gravitee.definition.model.Rule;
 import io.gravitee.management.model.ImportSwaggerDescriptorEntity;
-import io.gravitee.management.model.api.NewApiEntity;
 import io.gravitee.management.model.PageEntity;
+import io.gravitee.management.model.api.NewApiEntity;
 import io.gravitee.management.service.SwaggerService;
 import io.gravitee.management.service.exceptions.SwaggerDescriptorException;
+import io.gravitee.management.service.exceptions.UnknownHttpMethodException;
+import io.gravitee.management.service.exceptions.UnknownSwaggerSecurityTypeException;
+import io.gravitee.policy.api.PolicyConfiguration;
+import io.gravitee.policy.apikey.configuration.ApiKeyPolicyConfiguration;
+import io.gravitee.policy.oauth2.configuration.OAuth2PolicyConfiguration;
+import io.swagger.models.Operation;
 import io.swagger.models.Scheme;
 import io.swagger.models.Swagger;
+import io.swagger.models.auth.SecuritySchemeDefinition;
 import io.swagger.parser.SwaggerCompatConverter;
 import io.swagger.parser.SwaggerParser;
 import io.swagger.util.Json;
@@ -31,6 +44,7 @@ import io.swagger.util.Yaml;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,9 +56,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -86,6 +98,32 @@ public class SwaggerServiceImpl implements SwaggerService {
         return apiEntity;
     }
 
+    @Override
+    public Map<String, Path> preparePolicies(ImportSwaggerDescriptorEntity swaggerDescriptor) {
+        Map<String, Path> paths;
+
+        // try to read swagger in version 2
+        paths = preparePoliciesV2(swaggerDescriptor);
+
+        // try to read swagger in version 3 (openAPI)
+        if (paths == null) {
+            throw new NotImplementedException("Don't support Swagger v3 (openAPI) yet");
+//            apiEntity = prepareV3(swaggerDescriptor);
+        }
+
+        // try to read swagger in version 1
+        if (paths == null) {
+            throw new NotImplementedException("Don't support Swagger v1 yet");
+//            apiEntity = prepareV1(swaggerDescriptor);
+        }
+
+        if (paths == null) {
+            throw new SwaggerDescriptorException();
+        }
+
+        return paths;
+    }
+
     private NewApiEntity prepareV1(ImportSwaggerDescriptorEntity swaggerDescriptor) {
         NewApiEntity apiEntity;
         try {
@@ -119,6 +157,17 @@ public class SwaggerServiceImpl implements SwaggerService {
             apiEntity = mapSwagger12ToNewApi(new SwaggerParser().read(swaggerDescriptor.getPayload()));
         }
         return apiEntity;
+    }
+
+    private Map<String, Path> preparePoliciesV2(ImportSwaggerDescriptorEntity swaggerDescriptor) {
+        Map<String, Path> paths;
+        logger.info("Trying to loading a Swagger descriptor in v2");
+        if (swaggerDescriptor.getType() == ImportSwaggerDescriptorEntity.Type.INLINE) {
+            paths = mapSwagger12ToApiPaths(new SwaggerParser().parse(swaggerDescriptor.getPayload()));
+        } else {
+            paths = mapSwagger12ToApiPaths(new SwaggerParser().read(swaggerDescriptor.getPayload()));
+        }
+        return paths;
     }
 
     private NewApiEntity prepareV3(ImportSwaggerDescriptorEntity swaggerDescriptor) {
@@ -281,6 +330,119 @@ public class SwaggerServiceImpl implements SwaggerService {
 
         return apiEntity;
     }
+
+    private Map<String, Path> mapSwagger12ToApiPaths(Swagger swagger) {
+        if (swagger == null) {
+            return null;
+        }
+
+        ObjectMapper objectMapper = new GraviteeMapper();
+
+        Map<String, Path> paths = new HashMap<>();
+
+        Map<String, SecuritySchemeDefinition> securityDefinitions = swagger.getSecurityDefinitions();
+
+        for (Map.Entry<String, io.swagger.models.Path> pathEntry : swagger.getPaths().entrySet()) {
+
+            String pathString = pathEntry.getKey();
+            io.swagger.models.Path swaggerPath = pathEntry.getValue();
+
+            Path graviteePath = new Path();
+            graviteePath.setPath(pathString.replaceAll("\\{(.[^/]*)\\}", ":$1"));
+
+            List<Rule> rules = new ArrayList<>();
+
+            for (Map.Entry<io.swagger.models.HttpMethod, Operation> methodOperationEntry : swaggerPath.getOperationMap().entrySet()) {
+
+                io.swagger.models.HttpMethod httpMethod = methodOperationEntry.getKey();
+                Operation operation = methodOperationEntry.getValue();
+
+                Rule rule = new Rule();
+                rule.getMethods().add(convertSwaggerHttpMethod(httpMethod));
+
+                if (operation != null && operation.getSecurity() != null) {
+
+                    for (Map<String, List<String>> security : operation.getSecurity()) {
+
+                        for (Map.Entry<String, List<String>> securityEntries : security.entrySet()) {
+
+                            String securityResource = securityEntries.getKey();
+
+                            Policy policy = new Policy();
+                            policy.setName(
+                                    convertSwaggerSecurityType(securityDefinitions.get(securityResource).getType())
+                            );
+
+                            PolicyConfiguration policyConfiguration;
+
+                            if(policy.getName().equals("oauth2")){
+                                OAuth2PolicyConfiguration config = new OAuth2PolicyConfiguration();
+                                config.setCheckRequiredScopes(true);
+                                config.setExtractPayload(true);
+                                config.setOauthResource(securityResource);
+                                config.setRequiredScopes(securityEntries.getValue());
+                                policyConfiguration = config;
+
+                            }else if(policy.getName().equals("api-key")){
+                                ApiKeyPolicyConfiguration config = new ApiKeyPolicyConfiguration();
+                                config.setPropagateApiKey(false);
+                                policyConfiguration = config;
+                            }else{
+                                continue;
+                            }
+
+                            try {
+                                policy.setConfiguration(objectMapper.writeValueAsString(policyConfiguration));
+                            } catch (JsonProcessingException e) {
+                                e.printStackTrace();
+                            }
+
+                            rule.setPolicy(policy);
+                            rules.add(rule);
+                        }
+                    }
+                }
+            }
+            graviteePath.setRules(rules);
+            paths.put(pathString, graviteePath);
+        }
+
+        return paths;
+    }
+
+    private String convertSwaggerSecurityType(String type) {
+        switch (type) {
+            case "oauth2":
+                return "oauth2";
+            case "apiKey":
+                return "api-key";
+            default:
+                throw new UnknownSwaggerSecurityTypeException(type);
+        }
+    }
+
+    private HttpMethod convertSwaggerHttpMethod(io.swagger.models.HttpMethod httpMethod) {
+
+        switch (httpMethod) {
+            case DELETE:
+                return HttpMethod.DELETE;
+            case GET:
+                return HttpMethod.GET;
+            case HEAD:
+                return HttpMethod.HEAD;
+            case OPTIONS:
+                return HttpMethod.OPTIONS;
+            case PATCH:
+                return HttpMethod.PATCH;
+            case POST:
+                return HttpMethod.POST;
+            case PUT:
+                return HttpMethod.PUT;
+            default:
+                throw new UnknownHttpMethodException(httpMethod);
+        }
+    }
+
 
     private NewApiEntity mapOpenApiToNewApi(SwaggerParseResult swagger) {
         if (swagger == null || swagger.getOpenAPI() == null) {

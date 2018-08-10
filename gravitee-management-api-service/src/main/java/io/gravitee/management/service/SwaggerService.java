@@ -15,9 +15,12 @@
  */
 package io.gravitee.management.service;
 
+import io.gravitee.definition.model.Path;
 import io.gravitee.management.model.ImportSwaggerDescriptorEntity;
 import io.gravitee.management.model.api.NewApiEntity;
 import io.gravitee.management.model.PageEntity;
+
+import java.util.Map;
 
 /**
  * @author David BRASSELY (david.brassely at graviteesource.com)
@@ -33,6 +36,15 @@ public interface SwaggerService {
      * @return The API from the Swagger descriptor
      */
     NewApiEntity prepare(ImportSwaggerDescriptorEntity swaggerDescriptor);
+
+    /**
+     * Prepare an API from a Swagger descriptor. This method does not create an API but
+     * extract data with security constraints from Swagger to prepare an API to update with policies.
+     *
+     * @param swaggerDescriptor Swagger descriptor
+     * @return The API from the Swagger descriptor
+     */
+    Map<String, Path> preparePolicies(ImportSwaggerDescriptorEntity swaggerDescriptor);
 
     void transform(PageEntity page);
 }

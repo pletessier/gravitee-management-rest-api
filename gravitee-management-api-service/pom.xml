@@ -75,6 +75,18 @@
 		</dependency>
 
 		<dependency>
+			<groupId>io.gravitee.policy</groupId>
+			<artifactId>gravitee-policy-oauth2</artifactId>
+			<version>1.6.1</version>
+		</dependency>
+
+		<dependency>
+            <groupId>io.gravitee.policy</groupId>
+            <artifactId>gravitee-policy-apikey</artifactId>
+            <version>1.6.0</version>
+		</dependency>
+
+		<dependency>
 			<groupId>io.gravitee.plugin</groupId>
 			<artifactId>gravitee-plugin-resource</artifactId>
 		</dependency>

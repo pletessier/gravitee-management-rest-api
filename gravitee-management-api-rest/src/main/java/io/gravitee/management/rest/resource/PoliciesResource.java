@@ -16,6 +16,7 @@
 package io.gravitee.management.rest.resource;
 
 import io.gravitee.common.http.MediaType;
+import io.gravitee.management.model.ImportSwaggerDescriptorEntity;
 import io.gravitee.management.model.PolicyEntity;
 import io.gravitee.management.model.PolicyListItem;
 import io.gravitee.management.model.permissions.RolePermission;
@@ -23,19 +24,19 @@ import io.gravitee.management.model.permissions.RolePermissionAction;
 import io.gravitee.management.rest.security.Permission;
 import io.gravitee.management.rest.security.Permissions;
 import io.gravitee.management.service.PolicyService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.gravitee.management.service.SwaggerService;
+import io.swagger.annotations.*;
 
 import javax.inject.Inject;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+import javax.ws.rs.*;
 import javax.ws.rs.container.ResourceContext;
 import javax.ws.rs.core.Context;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -55,6 +56,9 @@ public class PoliciesResource {
 
     @Inject
     private PolicyService policyService;
+
+    @Inject
+    private SwaggerService swaggerService;
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -99,5 +103,20 @@ public class PoliciesResource {
         item.setType(policy.getType());
 
         return item;
+    }
+
+    @POST
+    @Path("import/swagger")
+    @Produces(MediaType.APPLICATION_JSON)
+    @ApiOperation(value = "Create the paths object of an API definition from a Swagger descriptor")
+    @ApiResponses({
+            @ApiResponse(code = 200, message = "Paths with policies from Swagger descriptor", response = Map.class),
+            @ApiResponse(code = 500, message = "Internal server error")})
+    @Permissions({
+            @Permission(value = RolePermission.MANAGEMENT_API, acls = RolePermissionAction.CREATE)
+    })
+    public Map<String, io.gravitee.definition.model.Path> importSwaggerPolicies(
+            @ApiParam(name = "swagger", required = true) @Valid @NotNull ImportSwaggerDescriptorEntity swaggerDescriptor) {
+        return swaggerService.preparePolicies(swaggerDescriptor);
     }
 }

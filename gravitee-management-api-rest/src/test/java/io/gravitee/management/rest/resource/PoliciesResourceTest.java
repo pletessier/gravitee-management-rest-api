@@ -15,16 +15,21 @@
  */
 package io.gravitee.management.rest.resource;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.gravitee.common.http.HttpStatusCode;
+import io.gravitee.definition.jackson.datatype.GraviteeMapper;
+import io.gravitee.definition.model.Path;
+import io.gravitee.management.model.ImportSwaggerDescriptorEntity;
 import io.gravitee.management.model.PolicyEntity;
+import io.gravitee.management.service.impl.SwaggerServiceImpl;
 import org.junit.Test;
+import org.mockito.InjectMocks;
 
 import javax.ws.rs.core.Response;
-
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.Set;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 
 import static org.junit.Assert.*;
 import static org.mockito.Matchers.any;
@@ -38,6 +43,9 @@ public class PoliciesResourceTest extends AbstractResourceTest {
     protected String contextPath() {
         return "policies";
     }
+
+    @InjectMocks
+    private SwaggerServiceImpl swaggerService = new SwaggerServiceImpl();
 
     @Test
     public void shouldGetPoliciesemptyList() {
@@ -117,5 +125,25 @@ public class PoliciesResourceTest extends AbstractResourceTest {
         assertEquals("id", "my-api", elt.get("id"));
         assertFalse("unknown expand", elt.containsKey("schema"));
         assertFalse("unknown expand", elt.containsKey("unknown"));
+    }
+
+    @Test
+    public void shouldImportSwaggerPathsWithPolicies() {
+
+        ImportSwaggerDescriptorEntity swaggerDescriptor = new ImportSwaggerDescriptorEntity();
+        swaggerDescriptor.setType(ImportSwaggerDescriptorEntity.Type.URL);
+        swaggerDescriptor.setPayload("http://petstore.swagger.io/v2/swagger.json");
+        Map<String, Path> paths = swaggerService.preparePolicies(swaggerDescriptor);
+
+        ObjectMapper objectMapper = new GraviteeMapper();
+        try {
+            objectMapper.writeValue(new File("entity.json"), paths);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return;
     }
 }
